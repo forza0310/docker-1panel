@@ -326,17 +326,39 @@ docker run -d \
     forza0310/1panel:v2
 ```
 
-### V2 Docker Compose 安装
+V2 Global：
 
-创建 `docker-compose.yml`:
+```bash
+docker run -d \
+  --name 1panel-v2-global \
+  --restart always \
+  --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /opt:/opt \
+  -e TZ=Asia/Shanghai \
+  -e PORT=10086 \
+  -e USERNAME=admin \
+  -e PASSWORD=your_secure_password \
+  -e ENTRANCE=myentrance \
+  moelin/1panel:global-v2
+```
+
+V1 仍可使用相同运行方式，只需把镜像替换为 `moelin/1panel:v1` 或 `moelin/1panel:global-v1`。V1 如需完整兼容旧部署，可继续挂载 `/var/lib/docker/volumes` 与 `/root`：
+
+```bash
+-v /var/lib/docker/volumes:/var/lib/docker/volumes \
+-v /root:/root
+```
+
+### Docker Compose
 
 ```yaml
-version: '3'
 services:
-  1panel-v2:
+  1panel:
+    image: moelin/1panel:v2
     container_name: 1panel-v2
     restart: always
-    network_mode: "host"
+    network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt:/opt
@@ -349,75 +371,123 @@ services:
       - BASE_DIR=/opt
     image: forza0310/1panel:v2
     labels:
-      createdBy: "Apps"
+      createdBy: Apps
 ```
 
-运行:
+启动：
+
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-### 环境变量配置
+如需国际版 V2，将 `image` 改为：
 
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
+```yaml
+image: moelin/1panel:global-v2
+```
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
 | `PORT` | `10086` | 面板访问端口 |
 | `USERNAME` | `1panel` | 管理员用户名 |
-| `PASSWORD` | `1panel_password` | 管理员密码 (首次启动自动生成随机密码) |
-| `ENTRANCE` | `entrance` | 安全入口路径 |
-| `BASE_DIR` | `/opt` | 数据存储目录 |
-| `TZ` | `Asia/Shanghai` | 时区设置 |
-| `RESET` | `false` | 设为 `true` 强制重置配置 |
+| `PASSWORD` | `1panel_password` | 管理员密码；空值或默认值会在首次启动时生成随机密码 |
+| `ENTRANCE` | `entrance` | 安全入口路径，不需要前后 `/` |
+| `BASE_DIR` | `/opt` | 1Panel 数据目录。映射到宿主机时应填写宿主机真实路径 |
+| `TZ` | `Asia/Shanghai` | 容器时区 |
+| `RESET` | `false` | 设为 `true` 可在启动时重置账号、密码、端口和入口 |
 
-> [!TIP]
-> **密码安全提示**
-> - 如果不设置 `PASSWORD` 或使用默认值，首次启动会自动生成随机密码
-> - 随机密码会在容器日志中显示，请及时查看并保存
-> - 查看日志: `docker logs 1panel-v2`
-
----
-
-## 镜像编译
-
-### V1 编译
+随机密码会输出到容器日志：
 
 ```bash
-# 单架构编译
-docker build --build-arg PANELVER=v1.10.22 -t 1panel:v1.10.22 ./V1
-
-# 多架构编译并推送
-docker buildx build \
-  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x \
-  --build-arg PANELVER=v1.10.22 \
-  -t <your-dockerhub-username>/1panel:v1.10.22 \
-  --push \
-  ./V1
+docker logs 1panel-v2
 ```
 
-### V1 Global 编译
+> [!IMPORTANT]
+> V1 环境变量配置仅适用于 `v1.10.34-lts` 及之后版本。旧版本 V1 请按原有方式部署和维护。
+
+## 旧数据与密码重置
+
+容器启动时会用数据目录里的 `.docker_initialized` 判断是否已经完成过 Docker 初始化。默认数据目录是 `/opt/1panel`；如果设置了 `BASE_DIR=/data`，对应宿主机路径就是 `/data/1panel/.docker_initialized`。
+
+已有旧数据时，如果数据库存在但没有这个标记文件，入口脚本会按“首次初始化”处理，并根据 `USERNAME`、`PASSWORD`、`PORT`、`ENTRANCE` 重新配置账号、密码、端口和入口。为了保留旧账号密码，请在启动新容器前确认标记文件存在：
 
 ```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x \
-  --build-arg PANELVER=v1.10.22 \
-  -t <your-dockerhub-username>/1panel:global-v1.10.22 \
-  -f ./V1/Dockerfile-Global \
-  --push \
-  ./V1
+# 默认 BASE_DIR=/opt
+touch /opt/1panel/.docker_initialized
+
+# 自定义 BASE_DIR=/data 时
+touch /data/1panel/.docker_initialized
 ```
 
-### V2 编译
+同时不要设置 `RESET=true`。`RESET=true` 会强制重新配置账号、密码、端口和入口，即使 `.docker_initialized` 已存在。
+
+数据库文件位置：
+
+```bash
+# V1
+/opt/1panel/db/1Panel.db
+
+# V2
+/opt/1panel/db/core.db
+/opt/1panel/db/agent.db
+```
+
+## 编译
+
+单架构本地构建：
+
+```bash
+# V2 CN
+docker build -t 1panel:v2 ./V2
+
+# V2 Global
+docker build -f ./V2/Dockerfile-Global -t 1panel:global-v2 ./V2
+```
+
+指定版本：
+
+```bash
+docker build \
+  --build-arg PANELVER=v2.2.2 \
+  -t 1panel:v2.2.2 \
+  ./V2
+
+docker build \
+  -f ./V2/Dockerfile-Global \
+  --build-arg PANELVER=v2.2.2 \
+  -t 1panel:global-v2.2.2 \
+  ./V2
+```
+
+多架构构建并推送：
 
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x \
-  --build-arg PANELVER=v2.0.6 \
-  -t <your-dockerhub-username>/1panel:v2.0.6 \
+  --build-arg PANELVER=v2.2.2 \
+  -t <your-dockerhub-username>/1panel:v2.2.2 \
+  -t <your-dockerhub-username>/1panel:v2 \
+  --push \
+  ./V2
+
+docker buildx build \
+  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x \
+  -f ./V2/Dockerfile-Global \
+  --build-arg PANELVER=v2.2.2 \
+  -t <your-dockerhub-username>/1panel:global-v2.2.2 \
+  -t <your-dockerhub-username>/1panel:global-v2 \
   --push \
   ./V2
 ```
 
----
+V1 构建：
+
+```bash
+docker build --build-arg PANELVER=v1.10.34-lts -t 1panel:v1 ./V1
+docker build -f ./V1/Dockerfile-Global --build-arg PANELVER=v1.10.34-lts -t 1panel:global-v1 ./V1
+```
 
 ## 常见问题
 
@@ -462,35 +532,27 @@ docker buildx build \
 ### Q3: 容器内如何执行 1pctl 命令?
 
 ```bash
-# 进入容器
-docker exec -it 1panel bash
-
-# V1 执行命令
-1pctl version
-
-# V2 执行命令
-1pctl version
+https://cdn.jsdelivr.net/gh/okxlin/ToolScript@main/1Panel/1panel-execution-mode/1panel_docker_to_sys.sh
 ```
 
-### Q4: 如何查看容器日志?
+官方迁移文档：<https://1panel.cn/docs/v2/installation/v1_migrate/>
+
+### 容器内如何执行 1pctl？
 
 ```bash
-# V1
-docker logs 1panel
-
-# V2
-docker logs 1panel-v2
-
-# 实时查看
-docker logs -f 1panel-v2
+docker exec -it 1panel-v2 bash
+1pctl version
+1pctl user-info
 ```
 
----
+### 为什么不建议在面板里直接点升级？
+
+容器镜像内包含特定版本的 1Panel 二进制与初始化文件。升级时建议拉取新镜像并重新部署，避免容器内升级后的文件状态与镜像版本不一致。
 
 ## 相关链接
 
-- [1Panel 官网](https://1panel.cn)
-- [1Panel 文档](https://1panel.cn/docs)
+- [1Panel 中国官网](https://1panel.cn)
+- [1Panel 国际站](https://1panel.pro)
 - [1Panel GitHub](https://github.com/1Panel-dev/1Panel)
 - [源项目 GitHub](https://github.com/okxlin/docker-1panel)
 - [本项目 GitHub](https://github.com/forza0310/docker-1panel)
